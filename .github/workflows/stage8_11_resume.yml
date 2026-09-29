@@ -2,6 +2,8 @@ name: OpenAlex Stage 8-11 Resume
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: write
