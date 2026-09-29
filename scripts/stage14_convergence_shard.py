@@ -194,7 +194,7 @@ def main():
         FROM p JOIN h USING(aa,bb)
         LEFT JOIN t ta ON ta.publication_year=p.publication_year AND ta.topic_id=p.aa
         LEFT JOIN t tb ON tb.publication_year=p.publication_year AND tb.topic_id=p.bb
-        LEFT JOIN d USING(publication_year)
+        LEFT JOIN d ON d.publication_year=p.publication_year
       )
       SELECT count(*),count(DISTINCT (aa,bb)),
              count(*) FILTER(WHERE publication_year<=2025 AND publication_year=first25 AND pair_works>=25 AND wa>=100 AND wb>=100 AND lift>=1.25)
