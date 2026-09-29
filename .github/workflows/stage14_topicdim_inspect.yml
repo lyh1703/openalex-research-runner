@@ -39,9 +39,8 @@ jobs:
           import duckdb,glob,json,os
           con=duckdb.connect()
           out={}
-          for p in glob.glob("entity/**/*.parquet",recursive=True):
-              if "topic" not in os.path.basename(p).lower():
-                  continue
+          for p in glob.glob("entity/entities/topics/dimension_parts/*.parquet"):
+
               try:
                   schema=[{"name":r[0],"type":r[1]} for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{p}')").fetchall()]
                   cur=con.execute(f"SELECT * FROM read_parquet('{p}') LIMIT 3")
