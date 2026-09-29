@@ -1,0 +1,58 @@
+name: OpenAlex Stage 14 Schema Inspect
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage14_inspect_start'
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_TAG: openalex-stage8-11-2026-09-23
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Download Stage 14 aggregate inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inputs
+          gh release download "$SOURCE_TAG" \
+            --pattern "topic_pair_year.parquet" \
+            --pattern "topic_year.parquet" \
+            --dir inputs
+          ls -lh inputs
+      - name: Inspect schemas and samples
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          con=duckdb.connect()
+          out={}
+          for name in ["topic_pair_year","topic_year"]:
+              p=f"inputs/{name}.parquet"
+              out[name]={}
+              out[name]["schema"]=[{"name":r[0],"type":r[1]} for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{p}')").fetchall()]
+              out[name]["rows"]=con.execute(f"SELECT count(*) FROM read_parquet('{p}')").fetchone()[0]
+              cur=con.execute(f"SELECT * FROM read_parquet('{p}') LIMIT 5")
+              cols=[d[0] for d in cur.description]
+              out[name]["sample"]=[dict(zip(cols,r)) for r in cur.fetchall()]
+          open("STAGE14_INPUT_SCHEMA.json","w").write(json.dumps(out,indent=2,default=str))
+          print(json.dumps(out,indent=2,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STAGE14_INPUT_SCHEMA
+          path: STAGE14_INPUT_SCHEMA.json
+          retention-days: 14
