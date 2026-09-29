@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths:
+      - '.github/openalex_stage8_11_start'
+  push:
+    branches: [main]
 
 permissions:
   contents: write
