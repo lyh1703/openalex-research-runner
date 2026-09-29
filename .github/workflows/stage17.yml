@@ -1,0 +1,103 @@
+name: OpenAlex Stage 17
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage17_start'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openalex-stage17
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  TAG16: openalex-stage16-2026-09-23
+  RESULT_TAG: openalex-stage17-2026-09-23
+
+jobs:
+  stage17:
+    name: Stage 17 robustness and negative controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5
+
+      - name: Download Stage 16 frozen backtest outputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p raw inputs
+          gh release download "$TAG16" --pattern "stage16_outputs.zip" --dir raw
+          sha256sum raw/stage16_outputs.zip | tee STAGE17_INPUT_SHA256.txt
+          unzip -q raw/stage16_outputs.zip \
+            STAGE16_FINAL_GATE.json \
+            topic_backtest_panel.parquet \
+            keyword_backtest_panel.parquet \
+            -d inputs
+          ls -lh inputs
+
+      - name: Run Stage 17 robustness program
+        run: |
+          python scripts/stage17_robustness.py \
+            --input inputs \
+            --output stage17
+
+      - name: Persist provenance
+        run: cp STAGE17_INPUT_SHA256.txt stage17/
+
+      - name: Package Stage 17 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release_assets split_assets
+          cp STAGE17_ROBUSTNESS_CONTRACT.md release_assets/
+          cp stage17/STAGE17_FINAL_GATE.json release_assets/
+          cp stage17/STAGE17_VALIDATION.json release_assets/
+          cp stage17/STAGE17_LIMITATIONS.json release_assets/
+          cp stage17/STAGE17_INPUT_SHA256.txt release_assets/
+          cp stage17/OPENALEX_STAGE17_ROBUSTNESS_REPORT.md release_assets/
+          (cd stage17 && zip -qr ../release_assets/stage17_outputs.zip .)
+          for f in release_assets/*; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -lt 1900000000 ]; then
+              cp "$f" split_assets/
+            else
+              split -b 1800M -d -a 2 "$f" "split_assets/$(basename "$f").part-"
+            fi
+          done
+          ls -lh split_assets
+
+      - name: Publish persistent Stage 17 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RESULT_TAG" --yes --cleanup-tag || true
+          gh release create "$RESULT_TAG" split_assets/* \
+            --title "OpenAlex Stage 17 | 2026-09-23 frozen snapshot" \
+            --notes "Bias, negative-control and robustness stress tests for the Stage 16 retrospective backtests. Includes volume/event-threshold sensitivity, temporal stability, missingness selection, domain heterogeneity and deterministic random placebo controls. Strict point-in-time validity remains untestable from a single snapshot."
+
+      - name: Upload compact Stage 17 gates
+        uses: actions/upload-artifact@v4
+        with:
+          name: OPENALEX_STAGE17_FINAL_GATES
+          path: |
+            STAGE17_ROBUSTNESS_CONTRACT.md
+            stage17/STAGE17_FINAL_GATE.json
+            stage17/STAGE17_VALIDATION.json
+            stage17/STAGE17_LIMITATIONS.json
+            stage17/STAGE17_INPUT_SHA256.txt
+            stage17/OPENALEX_STAGE17_ROBUSTNESS_REPORT.md
+          retention-days: 30
