@@ -264,8 +264,8 @@ def main():
     con.execute(f"""
       CREATE TABLE topic_features AS
       SELECT b.*,
-             log1p(primary_topic_works) log1p_primary_topic_works,
-             log1p(coalesce(active_partners,0)) log1p_active_partners,
+             ln(1+primary_topic_works) log1p_primary_topic_works,
+             ln(1+coalesce(active_partners,0)) log1p_active_partners,
              {','.join(pct_select)}
       FROM topic_base b
       {' '.join(pct_joins)}
@@ -371,7 +371,7 @@ def main():
     """)
     con.execute(f"""
       COPY (
-        SELECT k.*,log1p(keyword_works) log1p_keyword_works,
+        SELECT k.*,ln(1+keyword_works) log1p_keyword_works,
                ps.share_percentile_year,pc.share_cagr_3y_percentile_year,pf.mature_fwci_percentile_year
         FROM keyword_base k
         LEFT JOIN kp_share ps USING(year,keyword_id)
