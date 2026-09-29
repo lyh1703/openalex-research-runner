@@ -69,7 +69,10 @@ def main():
     parts=out/"parts"; parts.mkdir(exist_ok=True)
     files=load_manifest(); bins=balanced(files,args.shards)
     assigned=sorted(bins[args.shard]["files"],key=lambda z:z["index"])
-    if args.max_files>0: assigned=assigned[:args.max_files]
+    if args.max_files>0:
+        # Pilot runs must use representative heavy files; early manifest indices can be tiny tail partitions.
+        assigned=sorted(assigned,key=lambda z:z["bytes"],reverse=True)[:args.max_files]
+        assigned=sorted(assigned,key=lambda z:z["index"])
     if not assigned: raise RuntimeError("No files assigned")
 
     con=duckdb.connect()
