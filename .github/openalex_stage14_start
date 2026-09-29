@@ -1,1 +1,1 @@
-start 2026-09-29T23:07Z
+restart 2026-09-29T23:10Z after monolithic spill OOM; switch to 16 hash shards
