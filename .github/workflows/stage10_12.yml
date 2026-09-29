@@ -1,0 +1,198 @@
+name: OpenAlex Stage 10-12
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage10_12_start'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openalex-stage10-12
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  SOURCE_TAG: openalex-stage8-11-2026-09-23
+  RESULT_TAG: openalex-stage10-12-2026-09-23
+
+jobs:
+  stage10_11:
+    name: Stage 10-11 derived postprocess
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Download frozen Stage 8-11 aggregates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inputs
+          gh release download "$SOURCE_TAG" \
+            --pattern "base_dimensions_year.parquet" \
+            --pattern "topic_year.parquet" \
+            --pattern "keyword_year.parquet" \
+            --dir inputs
+          ls -lh inputs
+      - name: Run Stage 10 and 11 derived analytics plus QA
+        run: python scripts/stage10_11_postprocess.py --input inputs --output stage10_11
+      - name: Save Stage 10-11 outputs
+        uses: actions/cache/save@v4
+        with:
+          path: stage10_11
+          key: openalex-${{ github.run_id }}-stage10-11
+      - name: Upload Stage 10-11 gate
+        uses: actions/upload-artifact@v4
+        with:
+          name: STAGE10_11_GATE
+          path: |
+            stage10_11/STAGE10_11_LIVE_GATE.json
+            stage10_11/STAGE10_11_VALIDATION.json
+            stage10_11/OPENALEX_STAGE10_11_POSTPROCESS_REPORT.md
+          retention-days: 14
+
+  stage12:
+    name: Stage 12 citation shard ${{ matrix.shard }}
+    needs: stage10_11
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0,1,2,3,4,5,6,7]
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Process citation census and bounded edge sample
+        run: python scripts/stage12_citation_shard.py --shard "${{ matrix.shard }}" --output "stage12/shard-${{ matrix.shard }}"
+      - name: Save shard checkpoint
+        uses: actions/cache/save@v4
+        with:
+          path: stage12/shard-${{ matrix.shard }}
+          key: openalex-${{ github.run_id }}-stage12-shard-${{ matrix.shard }}
+
+  finalize:
+    name: Finalize Stage 12
+    needs: [stage10_11, stage12]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Restore Stage 10-11
+        uses: actions/cache/restore@v4
+        with:
+          path: stage10_11
+          key: openalex-${{ github.run_id }}-stage10-11
+          fail-on-cache-miss: true
+      - name: Restore Stage 12 shard 0
+        uses: actions/cache/restore@v4
+        with:
+          path: stage12/shard-0
+          key: openalex-${{ github.run_id }}-stage12-shard-0
+          fail-on-cache-miss: true
+      - name: Restore Stage 12 shard 1
+        uses: actions/cache/restore@v4
+        with:
+          path: stage12/shard-1
+          key: openalex-${{ github.run_id }}-stage12-shard-1
+          fail-on-cache-miss: true
+      - name: Restore Stage 12 shard 2
+        uses: actions/cache/restore@v4
+        with:
+          path: stage12/shard-2
+          key: openalex-${{ github.run_id }}-stage12-shard-2
+          fail-on-cache-miss: true
+      - name: Restore Stage 12 shard 3
+        uses: actions/cache/restore@v4
+        with:
+          path: stage12/shard-3
+          key: openalex-${{ github.run_id }}-stage12-shard-3
+          fail-on-cache-miss: true
+      - name: Restore Stage 12 shard 4
+        uses: actions/cache/restore@v4
+        with:
+          path: stage12/shard-4
+          key: openalex-${{ github.run_id }}-stage12-shard-4
+          fail-on-cache-miss: true
+      - name: Restore Stage 12 shard 5
+        uses: actions/cache/restore@v4
+        with:
+          path: stage12/shard-5
+          key: openalex-${{ github.run_id }}-stage12-shard-5
+          fail-on-cache-miss: true
+      - name: Restore Stage 12 shard 6
+        uses: actions/cache/restore@v4
+        with:
+          path: stage12/shard-6
+          key: openalex-${{ github.run_id }}-stage12-shard-6
+          fail-on-cache-miss: true
+      - name: Restore Stage 12 shard 7
+        uses: actions/cache/restore@v4
+        with:
+          path: stage12/shard-7
+          key: openalex-${{ github.run_id }}-stage12-shard-7
+          fail-on-cache-miss: true
+      - name: Merge and validate citation graph outputs
+        run: python scripts/stage12_finalize.py --root stage12 --output stage12_final
+      - name: Persist exact shard manifests
+        run: |
+          mkdir -p release_assets
+          zip -q release_assets/stage12_shard_manifests.zip stage12/shard-*/SHARD_MANIFEST.json
+      - name: Package research outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp stage10_11/STAGE10_11_LIVE_GATE.json release_assets/
+          cp stage10_11/STAGE10_11_VALIDATION.json release_assets/
+          cp stage10_11/OPENALEX_STAGE10_11_POSTPROCESS_REPORT.md release_assets/
+          cp stage12_final/STAGE12_FINAL_GATE.json release_assets/
+          cp stage12_final/OPENALEX_STAGE12_CITATION_GRAPH_REPORT.md release_assets/
+          (cd stage10_11 && zip -qr ../release_assets/stage10_11_derived.zip .)
+          (cd stage12_final && zip -qr ../release_assets/stage12_outputs.zip .)
+          mkdir -p split_assets
+          for f in release_assets/*; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -lt 1900000000 ]; then
+              cp "$f" split_assets/
+            else
+              split -b 1800M -d -a 2 "$f" "split_assets/$(basename "$f").part-"
+            fi
+          done
+          ls -lh split_assets
+      - name: Publish persistent Stage 10-12 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RESULT_TAG" --yes --cleanup-tag || true
+          gh release create "$RESULT_TAG" split_assets/* \
+            --title "OpenAlex Stage 10-12 | 2026-09-23 frozen snapshot" \
+            --notes "Stage 10 growth/burst/decline postprocessing, Stage 11 citation/FWCI normalization QA, and Stage 12 citation-graph census plus deterministic bounded topology sample. Full multi-billion edge materialization intentionally omitted under zero-cost architecture."
+      - name: Upload compact final gates
+        uses: actions/upload-artifact@v4
+        with:
+          name: OPENALEX_STAGE10_12_FINAL_GATES
+          path: |
+            stage10_11/STAGE10_11_LIVE_GATE.json
+            stage10_11/STAGE10_11_VALIDATION.json
+            stage10_11/OPENALEX_STAGE10_11_POSTPROCESS_REPORT.md
+            stage12_final/STAGE12_FINAL_GATE.json
+            stage12_final/OPENALEX_STAGE12_CITATION_GRAPH_REPORT.md
+          retention-days: 30
