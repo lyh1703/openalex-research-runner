@@ -1,0 +1,149 @@
+name: OpenAlex Stage 15
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage15_start'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openalex-stage15
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  TAG8: openalex-stage8-11-2026-09-23
+  TAG10: openalex-stage10-12-2026-09-23
+  TAG13: openalex-stage13-2026-09-23
+  TAG14: openalex-stage14-2026-09-23
+  RESULT_TAG: openalex-stage15-2026-09-23
+
+jobs:
+  stage15:
+    name: Stage 15 early-signal features
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5 pytz
+
+      - name: Download frozen upstream layers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p raw inputs/s10 inputs/s13 inputs/s14 inputs/entity
+
+          gh release download "$TAG10" --pattern "stage10_11_derived.zip" --dir raw
+          gh release download "$TAG13" --pattern "stage13_outputs.zip" --dir raw
+          gh release download "$TAG14" --pattern "stage14_outputs.zip" --dir raw
+          gh release download "$TAG8" \
+            --pattern "topic_year.parquet" \
+            --pattern "stage8_11_entity_layer.zip" \
+            --dir raw
+
+          unzip -q raw/stage10_11_derived.zip \
+            STAGE10_11_LIVE_GATE.json \
+            topic_growth_year.parquet \
+            primary_topic_impact_year.parquet \
+            keyword_growth_year.parquet \
+            keyword_impact_year.parquet \
+            -d inputs/s10
+
+          unzip -q raw/stage13_outputs.zip \
+            STAGE13_FINAL_GATE.json \
+            authors_count_hist.parquet \
+            institutions_count_hist.parquet \
+            countries_count_hist.parquet \
+            institution_activity_year.parquet \
+            country_activity_year.parquet \
+            country_pair_year.parquet \
+            -d inputs/s13
+
+          unzip -q raw/stage14_outputs.zip \
+            STAGE14_FINAL_GATE.json \
+            topic_convergence_year.parquet \
+            -d inputs/s14
+
+          cp raw/topic_year.parquet inputs/topic_year.parquet
+          unzip -q raw/stage8_11_entity_layer.zip 'entities/topics/dimension_parts/*' -d inputs/entity
+
+          sha256sum \
+            raw/stage10_11_derived.zip \
+            raw/stage13_outputs.zip \
+            raw/stage14_outputs.zip \
+            raw/topic_year.parquet \
+            raw/stage8_11_entity_layer.zip \
+            | tee STAGE15_INPUT_SHA256.txt
+
+          rm -f raw/stage10_11_derived.zip raw/stage13_outputs.zip raw/stage14_outputs.zip raw/stage8_11_entity_layer.zip
+          du -sh inputs
+          find inputs -type f | sort
+
+      - name: Build Stage 15 feature matrices
+        run: |
+          python scripts/stage15_features.py \
+            --s10 inputs/s10 \
+            --s13 inputs/s13 \
+            --s14 inputs/s14 \
+            --topic-year inputs/topic_year.parquet \
+            --topic-dim-glob "inputs/entity/entities/topics/dimension_parts/*.parquet" \
+            --output stage15
+
+      - name: Persist provenance
+        run: cp STAGE15_INPUT_SHA256.txt stage15/
+
+      - name: Package Stage 15 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release_assets split_assets
+          cp STAGE15_EARLY_SIGNAL_CONTRACT.md release_assets/
+          cp stage15/STAGE15_FINAL_GATE.json release_assets/
+          cp stage15/STAGE15_VALIDATION.json release_assets/
+          cp stage15/STAGE15_FEATURE_DICTIONARY.json release_assets/
+          cp stage15/STAGE15_INPUT_SHA256.txt release_assets/
+          cp stage15/OPENALEX_STAGE15_EARLY_SIGNAL_REPORT.md release_assets/
+          (cd stage15 && zip -qr ../release_assets/stage15_outputs.zip .)
+
+          for f in release_assets/*; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -lt 1900000000 ]; then
+              cp "$f" split_assets/
+            else
+              split -b 1800M -d -a 2 "$f" "split_assets/$(basename "$f").part-"
+            fi
+          done
+          ls -lh split_assets
+
+      - name: Publish persistent Stage 15 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RESULT_TAG" --yes --cleanup-tag || true
+          gh release create "$RESULT_TAG" split_assets/* \
+            --title "OpenAlex Stage 15 | 2026-09-23 frozen snapshot" \
+            --notes "Early-signal feature engineering. Backtest-safe topic/keyword matrices isolate lagged mature impact (t-3), preserve 2026 as frontier YTD, and emit no opaque composite score."
+
+      - name: Upload compact Stage 15 gates
+        uses: actions/upload-artifact@v4
+        with:
+          name: OPENALEX_STAGE15_FINAL_GATES
+          path: |
+            STAGE15_EARLY_SIGNAL_CONTRACT.md
+            stage15/STAGE15_FINAL_GATE.json
+            stage15/STAGE15_VALIDATION.json
+            stage15/STAGE15_FEATURE_DICTIONARY.json
+            stage15/STAGE15_INPUT_SHA256.txt
+            stage15/OPENALEX_STAGE15_EARLY_SIGNAL_REPORT.md
+          retention-days: 30
