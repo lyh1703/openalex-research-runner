@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 env:
-  HANDOFF_FILE_ID: 1tsvGgLUn0VSs6bXks50RRVHj8vEmFK9y
+  HANDOFF_FILE_ID: ${{ secrets.HANDOFF_FILE_ID }}
   SHARD_COUNT: '8'
   PYTHONUNBUFFERED: '1'
   BUNDLE: bootstrap/openalex_stage8_11_github_resume_repo.zip
