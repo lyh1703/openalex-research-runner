@@ -131,9 +131,12 @@ def main():
 
         if not batch_outputs["institution_activity"].exists():
             sql=f"""
-            WITH wi AS (
+            WITH a AS (
+              SELECT work_id,pub_year,corpus,tier,au
+              FROM read_parquet({q(local)}),UNNEST(authorships)t(au)
+            ), wi AS (
               SELECT DISTINCT work_id,pub_year,corpus,tier,i.id AS institution_id,i.country_code AS country_code
-              FROM read_parquet({q(local)}), UNNEST(institutions) t(i)
+              FROM a,UNNEST(au.institutions)t2(i)
               WHERE i.id IS NOT NULL
             )
             SELECT pub_year,corpus,tier,institution_id,any_value(country_code) country_code,count(*) works
@@ -171,12 +174,15 @@ def main():
         if not batch_outputs["inst_pair_sample"].exists():
             sql=f"""
             WITH sw AS (
-              SELECT work_id,pub_year,corpus,tier,institutions
+              SELECT work_id,pub_year,corpus,tier,authorships
               FROM read_parquet({q(local)})
               WHERE hash(work_id)%64=0 AND institutions_distinct_count BETWEEN 2 AND 32
+            ), a AS (
+              SELECT work_id,pub_year,corpus,tier,au
+              FROM sw,UNNEST(authorships)t(au)
             ), wi AS (
               SELECT DISTINCT work_id,pub_year,corpus,tier,i.id institution_id
-              FROM sw,UNNEST(institutions)t(i)
+              FROM a,UNNEST(au.institutions)t2(i)
               WHERE i.id IS NOT NULL
             )
             SELECT a.pub_year,a.corpus,a.tier,a.institution_id institution_a,b.institution_id institution_b,count(*) works
