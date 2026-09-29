@@ -38,7 +38,7 @@ jobs:
         run: |
           rm -rf runtime
           mkdir -p runtime
-          cat bootstrap/b64part_*.txt | tr -d '\\n' | base64 -d > /tmp/openalex-runner.zip
+          cat bootstrap/b64part_*.txt | base64 -d > /tmp/openalex-runner.zip
           echo "b752995f84094fec4f9fcb4fd42fbdb5656badd2f5311af69d34c264ad38cd50  /tmp/openalex-runner.zip" | sha256sum -c -
           unzip -q /tmp/openalex-runner.zip -d runtime
       - name: Download public Drive handoff
@@ -72,7 +72,7 @@ jobs:
         run: |
           rm -rf runtime
           mkdir -p runtime
-          cat bootstrap/b64part_*.txt | tr -d '\\n' | base64 -d > /tmp/openalex-runner.zip
+          cat bootstrap/b64part_*.txt | base64 -d > /tmp/openalex-runner.zip
           echo "b752995f84094fec4f9fcb4fd42fbdb5656badd2f5311af69d34c264ad38cd50  /tmp/openalex-runner.zip" | sha256sum -c -
           unzip -q /tmp/openalex-runner.zip -d runtime
       - name: Install runtime
@@ -103,7 +103,7 @@ jobs:
         run: |
           rm -rf runtime
           mkdir -p runtime
-          cat bootstrap/b64part_*.txt | tr -d '\\n' | base64 -d > /tmp/openalex-runner.zip
+          cat bootstrap/b64part_*.txt | base64 -d > /tmp/openalex-runner.zip
           echo "b752995f84094fec4f9fcb4fd42fbdb5656badd2f5311af69d34c264ad38cd50  /tmp/openalex-runner.zip" | sha256sum -c -
           unzip -q /tmp/openalex-runner.zip -d runtime
       - name: Install runtime
@@ -137,7 +137,7 @@ jobs:
         run: |
           rm -rf runtime
           mkdir -p runtime
-          cat bootstrap/b64part_*.txt | tr -d '\\n' | base64 -d > /tmp/openalex-runner.zip
+          cat bootstrap/b64part_*.txt | base64 -d > /tmp/openalex-runner.zip
           echo "b752995f84094fec4f9fcb4fd42fbdb5656badd2f5311af69d34c264ad38cd50  /tmp/openalex-runner.zip" | sha256sum -c -
           unzip -q /tmp/openalex-runner.zip -d runtime
       - name: Install runtime
