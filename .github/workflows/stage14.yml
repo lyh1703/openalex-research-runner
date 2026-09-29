@@ -18,63 +18,230 @@ env:
   PYTHONUNBUFFERED: '1'
   SOURCE_TAG: openalex-stage8-11-2026-09-23
   RESULT_TAG: openalex-stage14-2026-09-23
+  SHARD_COUNT: '16'
 
 jobs:
-  stage14:
-    name: Stage 14 convergence and novelty
+  prepare:
+    name: Stage 14 prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install runtime
         run: python -m pip install --quiet duckdb==1.5.5 pytz
-
       - name: Download frozen aggregate inputs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p inputs
+          mkdir -p inputs stage14_prepare
           gh release download "$SOURCE_TAG" \
             --pattern "topic_pair_year.parquet" \
             --pattern "topic_year.parquet" \
             --pattern "base_dimensions_year.parquet" \
             --pattern "stage8_11_entity_layer.zip" \
             --dir inputs
+          sha256sum inputs/topic_pair_year.parquet inputs/topic_year.parquet inputs/base_dimensions_year.parquet inputs/stage8_11_entity_layer.zip | tee stage14_prepare/STAGE14_INPUT_SHA256.txt
           mkdir -p inputs/entity
-          unzip -q inputs/stage8_11_entity_layer.zip -d inputs/entity
-          sha256sum inputs/topic_pair_year.parquet inputs/topic_year.parquet inputs/base_dimensions_year.parquet inputs/stage8_11_entity_layer.zip | tee STAGE14_INPUT_SHA256.txt
-          ls -lh inputs
-
-      - name: Run Stage 14
+          unzip -q inputs/stage8_11_entity_layer.zip 'entities/topics/dimension_parts/*' -d inputs/entity
+          rm inputs/stage8_11_entity_layer.zip
+      - name: Validate Stage 14 inputs
         run: |
-          python scripts/stage14_convergence.py \
+          python scripts/stage14_prepare.py \
             --pair inputs/topic_pair_year.parquet \
             --topic inputs/topic_year.parquet \
             --base inputs/base_dimensions_year.parquet \
             --topic-dim-glob "inputs/entity/entities/topics/dimension_parts/*.parquet" \
-            --output stage14
+            --output stage14_prepare
+      - name: Save Stage 14 input cache
+        uses: actions/cache/save@v4
+        with:
+          path: inputs
+          key: openalex-${{ github.run_id }}-stage14-inputs
+      - name: Save Stage 14 prepare gate
+        uses: actions/cache/save@v4
+        with:
+          path: stage14_prepare
+          key: openalex-${{ github.run_id }}-stage14-prepare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STAGE14_PREPARE_GATE
+          path: |
+            stage14_prepare/STAGE14_PREPARE.json
+            stage14_prepare/STAGE14_INPUT_SHA256.txt
+          retention-days: 14
 
-      - name: Persist input provenance
-        run: cp STAGE14_INPUT_SHA256.txt stage14/
+  stage14:
+    name: Stage 14 pair shard ${{ matrix.shard }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5 pytz
+      - name: Restore Stage 14 inputs
+        uses: actions/cache/restore@v4
+        with:
+          path: inputs
+          key: openalex-${{ github.run_id }}-stage14-inputs
+          fail-on-cache-miss: true
+      - name: Compute convergence shard
+        run: |
+          python scripts/stage14_convergence_shard.py \
+            --pair inputs/topic_pair_year.parquet \
+            --topic inputs/topic_year.parquet \
+            --base inputs/base_dimensions_year.parquet \
+            --topic-dim-glob "inputs/entity/entities/topics/dimension_parts/*.parquet" \
+            --shard "${{ matrix.shard }}" --shards 16 \
+            --output "stage14/shard-${{ matrix.shard }}"
+      - name: Save shard checkpoint
+        uses: actions/cache/save@v4
+        with:
+          path: stage14/shard-${{ matrix.shard }}
+          key: openalex-${{ github.run_id }}-stage14-shard-${{ matrix.shard }}
 
+  finalize:
+    name: Finalize Stage 14
+    needs: [prepare, stage14]
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5 pytz
+      - name: Restore Stage 14 prepare
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14_prepare
+          key: openalex-${{ github.run_id }}-stage14-prepare
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 0
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-0
+          key: openalex-${{ github.run_id }}-stage14-shard-0
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 1
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-1
+          key: openalex-${{ github.run_id }}-stage14-shard-1
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 2
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-2
+          key: openalex-${{ github.run_id }}-stage14-shard-2
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 3
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-3
+          key: openalex-${{ github.run_id }}-stage14-shard-3
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 4
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-4
+          key: openalex-${{ github.run_id }}-stage14-shard-4
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 5
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-5
+          key: openalex-${{ github.run_id }}-stage14-shard-5
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 6
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-6
+          key: openalex-${{ github.run_id }}-stage14-shard-6
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 7
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-7
+          key: openalex-${{ github.run_id }}-stage14-shard-7
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 8
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-8
+          key: openalex-${{ github.run_id }}-stage14-shard-8
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 9
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-9
+          key: openalex-${{ github.run_id }}-stage14-shard-9
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 10
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-10
+          key: openalex-${{ github.run_id }}-stage14-shard-10
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 11
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-11
+          key: openalex-${{ github.run_id }}-stage14-shard-11
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 12
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-12
+          key: openalex-${{ github.run_id }}-stage14-shard-12
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 13
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-13
+          key: openalex-${{ github.run_id }}-stage14-shard-13
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 14
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-14
+          key: openalex-${{ github.run_id }}-stage14-shard-14
+          fail-on-cache-miss: true
+      - name: Restore Stage 14 shard 15
+        uses: actions/cache/restore@v4
+        with:
+          path: stage14/shard-15
+          key: openalex-${{ github.run_id }}-stage14-shard-15
+          fail-on-cache-miss: true
+      - name: Merge and validate Stage 14
+        run: python scripts/stage14_finalize.py --root stage14 --prepare stage14_prepare --output stage14_final --shards 16
       - name: Package Stage 14 outputs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release_assets split_assets
           cp STAGE14_CONVERGENCE_CONTRACT.md release_assets/
-          cp stage14/STAGE14_FINAL_GATE.json release_assets/
-          cp stage14/STAGE14_VALIDATION.json release_assets/
-          cp stage14/STAGE14_THRESHOLD_SENSITIVITY.json release_assets/
-          cp stage14/STAGE14_INPUT_SHA256.txt release_assets/
-          cp stage14/OPENALEX_STAGE14_CONVERGENCE_REPORT.md release_assets/
-          (cd stage14 && zip -qr ../release_assets/stage14_outputs.zip .)
+          cp stage14_prepare/STAGE14_PREPARE.json release_assets/
+          cp stage14_prepare/STAGE14_INPUT_SHA256.txt release_assets/
+          cp stage14_final/STAGE14_FINAL_GATE.json release_assets/
+          cp stage14_final/STAGE14_VALIDATION.json release_assets/
+          cp stage14_final/STAGE14_THRESHOLD_SENSITIVITY.json release_assets/
+          cp stage14_final/OPENALEX_STAGE14_CONVERGENCE_REPORT.md release_assets/
+          zip -q release_assets/stage14_shard_manifests.zip stage14/shard-*/SHARD_MANIFEST.json stage14/shard-*/SHARD_QA.json stage14/shard-*/SHARD_SENSITIVITY.json
+          (cd stage14_final && zip -qr ../release_assets/stage14_outputs.zip .)
           for f in release_assets/*; do
             size=$(stat -c%s "$f")
             if [ "$size" -lt 1900000000 ]; then
@@ -84,7 +251,6 @@ jobs:
             fi
           done
           ls -lh split_assets
-
       - name: Publish persistent Stage 14 release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,17 +258,17 @@ jobs:
           gh release delete "$RESULT_TAG" --yes --cleanup-tag || true
           gh release create "$RESULT_TAG" split_assets/* \
             --title "OpenAlex Stage 14 | 2026-09-23 frozen snapshot" \
-            --notes "Convergence and novel-combination analytics derived from Stage 9 topic-pair aggregates. Core + Tier A is primary; 2026 is frontier YTD. No opaque composite score."
-
+            --notes "Convergence and novel-combination analytics, hash-sharded by canonical topic pair after the monolithic spill/OOM recovery. Core + Tier A primary; 2026 frontier YTD; no opaque composite score."
       - name: Upload compact Stage 14 gates
         uses: actions/upload-artifact@v4
         with:
           name: OPENALEX_STAGE14_FINAL_GATES
           path: |
             STAGE14_CONVERGENCE_CONTRACT.md
-            stage14/STAGE14_FINAL_GATE.json
-            stage14/STAGE14_VALIDATION.json
-            stage14/STAGE14_THRESHOLD_SENSITIVITY.json
-            stage14/STAGE14_INPUT_SHA256.txt
-            stage14/OPENALEX_STAGE14_CONVERGENCE_REPORT.md
+            stage14_prepare/STAGE14_PREPARE.json
+            stage14_prepare/STAGE14_INPUT_SHA256.txt
+            stage14_final/STAGE14_FINAL_GATE.json
+            stage14_final/STAGE14_VALIDATION.json
+            stage14_final/STAGE14_THRESHOLD_SENSITIVITY.json
+            stage14_final/OPENALEX_STAGE14_CONVERGENCE_REPORT.md
           retention-days: 30
