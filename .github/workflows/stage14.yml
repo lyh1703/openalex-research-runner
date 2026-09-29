@@ -1,0 +1,108 @@
+name: OpenAlex Stage 14
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage14_start'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openalex-stage14
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  SOURCE_TAG: openalex-stage8-11-2026-09-23
+  RESULT_TAG: openalex-stage14-2026-09-23
+
+jobs:
+  stage14:
+    name: Stage 14 convergence and novelty
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5 pytz
+
+      - name: Download frozen aggregate inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p inputs
+          gh release download "$SOURCE_TAG" \
+            --pattern "topic_pair_year.parquet" \
+            --pattern "topic_year.parquet" \
+            --pattern "base_dimensions_year.parquet" \
+            --pattern "stage8_11_entity_layer.zip" \
+            --dir inputs
+          mkdir -p inputs/entity
+          unzip -q inputs/stage8_11_entity_layer.zip -d inputs/entity
+          sha256sum inputs/topic_pair_year.parquet inputs/topic_year.parquet inputs/base_dimensions_year.parquet inputs/stage8_11_entity_layer.zip | tee STAGE14_INPUT_SHA256.txt
+          ls -lh inputs
+
+      - name: Run Stage 14
+        run: |
+          python scripts/stage14_convergence.py \
+            --pair inputs/topic_pair_year.parquet \
+            --topic inputs/topic_year.parquet \
+            --base inputs/base_dimensions_year.parquet \
+            --topic-dim-glob "inputs/entity/entities/topics/dimension_parts/*.parquet" \
+            --output stage14
+
+      - name: Persist input provenance
+        run: cp STAGE14_INPUT_SHA256.txt stage14/
+
+      - name: Package Stage 14 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release_assets split_assets
+          cp STAGE14_CONVERGENCE_CONTRACT.md release_assets/
+          cp stage14/STAGE14_FINAL_GATE.json release_assets/
+          cp stage14/STAGE14_VALIDATION.json release_assets/
+          cp stage14/STAGE14_THRESHOLD_SENSITIVITY.json release_assets/
+          cp stage14/STAGE14_INPUT_SHA256.txt release_assets/
+          cp stage14/OPENALEX_STAGE14_CONVERGENCE_REPORT.md release_assets/
+          (cd stage14 && zip -qr ../release_assets/stage14_outputs.zip .)
+          for f in release_assets/*; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -lt 1900000000 ]; then
+              cp "$f" split_assets/
+            else
+              split -b 1800M -d -a 2 "$f" "split_assets/$(basename "$f").part-"
+            fi
+          done
+          ls -lh split_assets
+
+      - name: Publish persistent Stage 14 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RESULT_TAG" --yes --cleanup-tag || true
+          gh release create "$RESULT_TAG" split_assets/* \
+            --title "OpenAlex Stage 14 | 2026-09-23 frozen snapshot" \
+            --notes "Convergence and novel-combination analytics derived from Stage 9 topic-pair aggregates. Core + Tier A is primary; 2026 is frontier YTD. No opaque composite score."
+
+      - name: Upload compact Stage 14 gates
+        uses: actions/upload-artifact@v4
+        with:
+          name: OPENALEX_STAGE14_FINAL_GATES
+          path: |
+            STAGE14_CONVERGENCE_CONTRACT.md
+            stage14/STAGE14_FINAL_GATE.json
+            stage14/STAGE14_VALIDATION.json
+            stage14/STAGE14_THRESHOLD_SENSITIVITY.json
+            stage14/STAGE14_INPUT_SHA256.txt
+            stage14/OPENALEX_STAGE14_CONVERGENCE_REPORT.md
+          retention-days: 30
