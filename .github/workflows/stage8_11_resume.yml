@@ -1,0 +1,228 @@
+name: OpenAlex Stage 8-11 Resume
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  HANDOFF_FILE_ID: 1tsvGgLUn0VSs6bXks50RRVHj8vEmFK9y
+  SHARD_COUNT: '8'
+  PYTHONUNBUFFERED: '1'
+  BUNDLE: bootstrap/openalex_stage8_11_github_resume_repo.zip
+  RUNTIME: runtime/openalex_github_resume_repo
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      matrix: ${{ steps.mx.outputs.matrix }}
+      completed_count: ${{ steps.mx.outputs.completed_count }}
+      remaining_count: ${{ steps.mx.outputs.remaining_count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unpack frozen runner bundle
+        run: |
+          rm -rf runtime
+          mkdir -p runtime
+          unzip -q "$BUNDLE" -d runtime
+      - name: Download public Drive handoff
+        run: |
+          python -m pip install --quiet gdown
+          gdown --id "$HANDOFF_FILE_ID" -O handoff.zip
+          test -s handoff.zip
+      - name: Build balanced remainder matrix
+        id: mx
+        shell: bash
+        run: |
+          python "$RUNTIME/scripts/prepare_matrix.py" --handoff-zip handoff.zip --shards "$SHARD_COUNT" --out matrix.json > matrix.pretty.json
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          d=json.load(open('matrix.json'))
+          print('matrix='+json.dumps({'include':d['include']},separators=(',',':')))
+          print('completed_count='+str(d['completed_count']))
+          print('remaining_count='+str(d['remaining_count']))
+          PY
+          cat matrix.pretty.json
+
+  entities:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unpack frozen runner bundle
+        run: |
+          rm -rf runtime
+          mkdir -p runtime
+          unzip -q "$BUNDLE" -d runtime
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Build frozen entity layer
+        working-directory: runtime/openalex_github_resume_repo/scripts
+        run: python entities_cloud.py --output "../../../cache/entities"
+      - name: Save entity layer to Actions cache
+        uses: actions/cache/save@v4
+        with:
+          path: cache/entities
+          key: stage8-11-${{ github.run_id }}-entities
+
+  works:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unpack frozen runner bundle
+        run: |
+          rm -rf runtime
+          mkdir -p runtime
+          unzip -q "$BUNDLE" -d runtime
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Process assigned Works batches
+        working-directory: runtime/openalex_github_resume_repo/scripts
+        env:
+          BATCHES_JSON: ${{ toJSON(matrix.batches) }}
+        run: |
+          python works_shard.py \
+            --shard "${{ matrix.shard }}" \
+            --batches-json "$BATCHES_JSON" \
+            --output "../../../cache/shard-${{ matrix.shard }}"
+      - name: Save shard output to Actions cache
+        uses: actions/cache/save@v4
+        with:
+          path: cache/shard-${{ matrix.shard }}
+          key: stage8-11-${{ github.run_id }}-shard-${{ matrix.shard }}
+
+  finalize:
+    needs: [prepare, entities, works]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.entities.result == 'success' && needs.works.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unpack frozen runner bundle
+        run: |
+          rm -rf runtime
+          mkdir -p runtime
+          unzip -q "$BUNDLE" -d runtime
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5 gdown
+      - name: Download local handoff for final merge
+        run: |
+          gdown --id "$HANDOFF_FILE_ID" -O handoff.zip
+          test -s handoff.zip
+      - name: Restore shard 0
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/shard-0
+          key: stage8-11-${{ github.run_id }}-shard-0
+          fail-on-cache-miss: true
+      - name: Restore shard 1
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/shard-1
+          key: stage8-11-${{ github.run_id }}-shard-1
+          fail-on-cache-miss: true
+      - name: Restore shard 2
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/shard-2
+          key: stage8-11-${{ github.run_id }}-shard-2
+          fail-on-cache-miss: true
+      - name: Restore shard 3
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/shard-3
+          key: stage8-11-${{ github.run_id }}-shard-3
+          fail-on-cache-miss: true
+      - name: Restore shard 4
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/shard-4
+          key: stage8-11-${{ github.run_id }}-shard-4
+          fail-on-cache-miss: true
+      - name: Restore shard 5
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/shard-5
+          key: stage8-11-${{ github.run_id }}-shard-5
+          fail-on-cache-miss: true
+      - name: Restore shard 6
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/shard-6
+          key: stage8-11-${{ github.run_id }}-shard-6
+          fail-on-cache-miss: true
+      - name: Restore shard 7
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/shard-7
+          key: stage8-11-${{ github.run_id }}-shard-7
+          fail-on-cache-miss: true
+      - name: Restore entity layer
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/entities
+          key: stage8-11-${{ github.run_id }}-entities
+          fail-on-cache-miss: true
+      - name: Merge local and cloud outputs and verify full coverage
+        run: |
+          python "$RUNTIME/scripts/finalize_resume.py" \
+            --handoff-zip handoff.zip \
+            --shards-root cache \
+            --entities-root cache/entities \
+            --output final_result
+      - name: Prepare persistent release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release_assets
+          cp final_result/STAGE8_11_FINAL_GATE.json release_assets/
+          cp final_result/STAGE8_11_CLOUD_SUMMARY.json release_assets/
+          (cd cache/entities && zip -qr ../../release_assets/stage8_11_entity_layer.zip .)
+          for f in final_result/final/*; do
+            [ -f "$f" ] || continue
+            size=$(stat -c%s "$f")
+            if [ "$size" -lt 2000000000 ]; then
+              cp "$f" release_assets/
+            else
+              split -b 1900M -d -a 2 "$f" "release_assets/$(basename "$f").part-"
+            fi
+          done
+          ls -lh release_assets
+      - name: Publish persistent GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: openalex-stage8-11-2026-09-23
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" release_assets/* \
+            --title "OpenAlex Stage 8-11 | 2026-09-23 frozen snapshot" \
+            --notes "Resumed from local handoff and completed on GitHub Actions. Generated outputs are OpenAlex-derived research aggregates; no raw snapshot is stored in the repository."
+      - name: Upload tiny gate summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: STAGE8_11_GATE_SUMMARY
+          path: |
+            final_result/STAGE8_11_FINAL_GATE.json
+            final_result/STAGE8_11_CLOUD_SUMMARY.json
+          retention-days: 7
