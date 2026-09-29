@@ -430,7 +430,7 @@ def main():
 
     # Compact descriptive report; detailed per-feature evidence stays in Parquet.
     topic_all=con.execute(f"""
-      SELECT target,horizon,count(*) rows,
+      SELECT target,horizon,count(*) AS feature_rows,
              avg(mean_annual_spearman_rho) avg_feature_rho,
              median(mean_annual_spearman_rho) median_feature_rho,
              avg(high_tail_lift) avg_high_tail_lift,
@@ -439,7 +439,7 @@ def main():
       GROUP BY 1,2 ORDER BY 1,2
     """).fetchall()
     kw_all=con.execute(f"""
-      SELECT target,horizon,count(*) rows,
+      SELECT target,horizon,count(*) AS feature_rows,
              avg(mean_annual_spearman_rho) avg_feature_rho,
              median(mean_annual_spearman_rho) median_feature_rho,
              avg(high_tail_lift) avg_high_tail_lift,
