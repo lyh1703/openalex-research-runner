@@ -1,0 +1,227 @@
+name: OpenAlex Stage 13
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage13_start'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openalex-stage13
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  RESULT_TAG: openalex-stage13-2026-09-23
+  SHARD_COUNT: '16'
+
+jobs:
+  pilot:
+    name: Stage 13 one-file pilot
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Run one-file network pilot
+        run: |
+          python scripts/stage13_network_shard.py --shard 0 --shards 16 --max-files 1 --batch-files 1 --output pilot
+          python - <<'PY'
+          import json
+          q=json.load(open("pilot/SHARD_QA.json"))
+          print(json.dumps(q,indent=2))
+          assert q["pass"] is True
+          PY
+      - name: Upload pilot gate
+        uses: actions/upload-artifact@v4
+        with:
+          name: STAGE13_PILOT_GATE
+          path: |
+            pilot/SHARD_QA.json
+            pilot/SHARD_MANIFEST.json
+          retention-days: 14
+
+  stage13:
+    name: Stage 13 network shard ${{ matrix.shard }}
+    needs: pilot
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Build Stage 13 network layer
+        run: python scripts/stage13_network_shard.py --shard "${{ matrix.shard }}" --shards 16 --batch-files 2 --output "stage13/shard-${{ matrix.shard }}"
+      - name: Save shard checkpoint
+        uses: actions/cache/save@v4
+        with:
+          path: stage13/shard-${{ matrix.shard }}
+          key: openalex-${{ github.run_id }}-stage13-shard-${{ matrix.shard }}
+
+  finalize:
+    name: Finalize Stage 13
+    needs: [pilot, stage13]
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: python -m pip install --quiet duckdb==1.5.5
+      - name: Restore Stage 13 shard 0
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-0
+          key: openalex-${{ github.run_id }}-stage13-shard-0
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 1
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-1
+          key: openalex-${{ github.run_id }}-stage13-shard-1
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 2
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-2
+          key: openalex-${{ github.run_id }}-stage13-shard-2
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 3
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-3
+          key: openalex-${{ github.run_id }}-stage13-shard-3
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 4
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-4
+          key: openalex-${{ github.run_id }}-stage13-shard-4
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 5
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-5
+          key: openalex-${{ github.run_id }}-stage13-shard-5
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 6
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-6
+          key: openalex-${{ github.run_id }}-stage13-shard-6
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 7
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-7
+          key: openalex-${{ github.run_id }}-stage13-shard-7
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 8
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-8
+          key: openalex-${{ github.run_id }}-stage13-shard-8
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 9
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-9
+          key: openalex-${{ github.run_id }}-stage13-shard-9
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 10
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-10
+          key: openalex-${{ github.run_id }}-stage13-shard-10
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 11
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-11
+          key: openalex-${{ github.run_id }}-stage13-shard-11
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 12
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-12
+          key: openalex-${{ github.run_id }}-stage13-shard-12
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 13
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-13
+          key: openalex-${{ github.run_id }}-stage13-shard-13
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 14
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-14
+          key: openalex-${{ github.run_id }}-stage13-shard-14
+          fail-on-cache-miss: true
+      - name: Restore Stage 13 shard 15
+        uses: actions/cache/restore@v4
+        with:
+          path: stage13/shard-15
+          key: openalex-${{ github.run_id }}-stage13-shard-15
+          fail-on-cache-miss: true
+      - name: Merge and validate Stage 13
+        run: python scripts/stage13_finalize.py --root stage13 --output stage13_final --shards 16
+      - name: Persist shard manifests
+        run: |
+          mkdir -p release_assets
+          zip -q release_assets/stage13_shard_manifests.zip stage13/shard-*/SHARD_MANIFEST.json stage13/shard-*/SHARD_QA.json
+      - name: Package Stage 13 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp STAGE13_NETWORK_CONTRACT.md release_assets/
+          cp stage13_final/STAGE13_FINAL_GATE.json release_assets/
+          cp stage13_final/STAGE13_VALIDATION.json release_assets/
+          cp stage13_final/OPENALEX_STAGE13_NETWORK_REPORT.md release_assets/
+          (cd stage13_final && zip -qr ../release_assets/stage13_outputs.zip .)
+          mkdir -p split_assets
+          for f in release_assets/*; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -lt 1900000000 ]; then
+              cp "$f" split_assets/
+            else
+              split -b 1800M -d -a 2 "$f" "split_assets/$(basename "$f").part-"
+            fi
+          done
+          ls -lh split_assets
+      - name: Publish persistent Stage 13 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RESULT_TAG" --yes --cleanup-tag || true
+          gh release create "$RESULT_TAG" split_assets/* \
+            --title "OpenAlex Stage 13 | 2026-09-23 frozen snapshot" \
+            --notes "Author / institution / country network layer. Full-census institution/country activity and country collaboration; deterministic bounded institution/author topology with explicit hyperedge audit."
+      - name: Upload compact Stage 13 gates
+        uses: actions/upload-artifact@v4
+        with:
+          name: OPENALEX_STAGE13_FINAL_GATES
+          path: |
+            STAGE13_NETWORK_CONTRACT.md
+            stage13_final/STAGE13_FINAL_GATE.json
+            stage13_final/STAGE13_VALIDATION.json
+            stage13_final/OPENALEX_STAGE13_NETWORK_REPORT.md
+          retention-days: 30
