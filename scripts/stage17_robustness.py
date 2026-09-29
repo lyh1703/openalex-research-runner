@@ -196,7 +196,7 @@ def event_threshold_sensitivity(con,table,entity_type,targets):
             GROUP BY threshold,signal_year,feature_name
             HAVING count(*)>=50
           )
-          SELECT threshold,feature_name,count(*) years,min(signal_year),max(signal_year),
+          SELECT threshold,feature_name,count(*) AS n_years,min(signal_year),max(signal_year),
                  sum(n) n,sum(event_count) event_count,
                  sum(high_n) high_n,sum(high_event_count) high_event_count,
                  sum(low_n) low_n,sum(low_event_count) low_event_count,
@@ -269,7 +269,7 @@ def negative_controls(con,panel_view,entity_type,idcol,targets):
                    sum((outcome_pct>=0.90)::INTEGER) FILTER(WHERE feature_pct<=0.10) low_event_count
             FROM r GROUP BY seed,signal_year HAVING count(*)>=50
           )
-          SELECT seed,count(*) years,min(signal_year),max(signal_year),
+          SELECT seed,count(*) AS n_years,min(signal_year),max(signal_year),
                  sum(n) n,sum(event_count) event_count,
                  sum(high_n) high_n,sum(high_event_count) high_event_count,
                  sum(low_n) low_n,sum(low_event_count) low_event_count,
