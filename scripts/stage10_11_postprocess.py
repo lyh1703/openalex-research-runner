@@ -44,7 +44,7 @@ def growth_for(con,query,out_prefix,outdir):
             rows=cur.fetchmany(10000)
             if not rows:break
             for t in rows:
-                k=(t[idx['corpus']],t[idx['entity_id']]); r={'year':int(t[idx['year']]),'count':int(t[idx['count']]),'denominator':float(t[idx['denominator']]) if t[idx['denominator']] is not None else None}
+                k=(t[idx['corpus']],t[idx['entity_id']]); yidx=idx.get('year',idx.get('yr')); r={'year':int(t[yidx]),'count':int(t[idx['count']]),'denominator':float(t[idx['denominator']]) if t[idx['denominator']] is not None else None}
                 if key is None:key=k
                 if k!=key: flush(key,buf);buf=[];key=k
                 buf.append(r)
@@ -56,8 +56,8 @@ def growth_for(con,query,out_prefix,outdir):
 def impact_copy(con,source_sql,outpath):
     q=f"""
     WITH x AS ({source_sql})
-    SELECT *,
-      CASE WHEN year<=2022 THEN 'full_4y_window' WHEN year=2023 THEN 'partial_4y_window' WHEN year IN (2024,2025) THEN 'early_window' WHEN year>=2026 THEN 'frontier_ytd' ELSE 'unknown' END maturity_class,
+    SELECT * EXCLUDE(yr), yr AS year,
+      CASE WHEN yr<=2022 THEN 'full_4y_window' WHEN yr=2023 THEN 'partial_4y_window' WHEN yr IN (2024,2025) THEN 'early_window' WHEN yr>=2026 THEN 'frontier_ytd' ELSE 'unknown' END maturity_class,
       cited_by_sum::DOUBLE/NULLIF(works,0) citations_per_work,
       uncited_works::DOUBLE/NULLIF(works,0) uncited_rate,
       fwci_nonmissing::DOUBLE/NULLIF(works,0) fwci_coverage,
@@ -70,7 +70,7 @@ def impact_copy(con,source_sql,outpath):
       cited_by_percentile_midpoint_sum::DOUBLE/NULLIF(cited_by_percentile_nonmissing,0) mean_age_percentile_scored,
       works<25 low_volume_flag,
       (fwci_nonmissing::DOUBLE/NULLIF(works,0))<0.50 OR fwci_nonmissing=0 low_fwci_coverage_flag,
-      (works>=25 AND fwci_nonmissing::DOUBLE/NULLIF(works,0)>=0.50 AND year<=2022) eligible_for_primary_impact_comparison,
+      (works>=25 AND fwci_nonmissing::DOUBLE/NULLIF(works,0)>=0.50 AND yr<=2022) eligible_for_primary_impact_comparison,
       fwci_sum::DOUBLE/NULLIF(fwci_nonmissing,0) fwci_relative_to_world
     FROM x
     """
@@ -86,23 +86,23 @@ def main():
         if not p.exists():raise FileNotFoundError(p)
     gtest=growth_test();itest=impact_test()
     con.execute(f"CREATE VIEW base AS SELECT * FROM read_parquet('{base}')");con.execute(f"CREATE VIEW kw AS SELECT * FROM read_parquet('{kw}')")
-    den="SELECT publication_year year,corpus,sum(works) denominator FROM base WHERE kind='universe' AND tier='A' GROUP BY 1,2"
+    den="SELECT publication_year AS yr,corpus,sum(works) denominator FROM base WHERE kind='universe' AND tier='A' GROUP BY 1,2"
     stats={}
-    qtopic=f"""WITH d AS ({den}), s AS (SELECT publication_year year,corpus,id entity_id,sum(works) count FROM base WHERE kind='primary_topic' AND tier='A' GROUP BY 1,2,3) SELECT s.corpus,s.entity_id,s.year,s.count,d.denominator FROM s JOIN d USING(year,corpus) ORDER BY 1,2,3"""
+    qtopic=f"""WITH d AS ({den}), s AS (SELECT publication_year AS yr,corpus,id entity_id,sum(works) count FROM base WHERE kind='primary_topic' AND tier='A' GROUP BY 1,2,3) SELECT s.corpus,s.entity_id,s.yr,s.count,d.denominator FROM s JOIN d ON s.yr=d.yr AND s.corpus=d.corpus ORDER BY 1,2,3"""
     stats['topic']=growth_for(con,qtopic,'topic',out)
-    qkw=f"""WITH d AS ({den}), s AS (SELECT publication_year year,corpus,keyword_id entity_id,sum(works) count FROM kw WHERE tier='A' GROUP BY 1,2,3) SELECT s.corpus,s.entity_id,s.year,s.count,d.denominator FROM s JOIN d USING(year,corpus) ORDER BY 1,2,3"""
+    qkw=f"""WITH d AS ({den}), s AS (SELECT publication_year AS yr,corpus,keyword_id entity_id,sum(works) count FROM kw WHERE tier='A' GROUP BY 1,2,3) SELECT s.corpus,s.entity_id,s.yr,s.count,d.denominator FROM s JOIN d ON s.yr=d.yr AND s.corpus=d.corpus ORDER BY 1,2,3"""
     stats['keyword']=growth_for(con,qkw,'keyword',out)
     for kind,name in [('primary_domain','domain'),('primary_field','field'),('primary_subfield','subfield')]:
-        q=f"""WITH d AS ({den}), s AS (SELECT publication_year year,corpus,id entity_id,sum(works) count FROM base WHERE kind='{kind}' AND tier='A' GROUP BY 1,2,3) SELECT s.corpus,s.entity_id,s.year,s.count,d.denominator FROM s JOIN d USING(year,corpus) ORDER BY 1,2,3"""
+        q=f"""WITH d AS ({den}), s AS (SELECT publication_year AS yr,corpus,id entity_id,sum(works) count FROM base WHERE kind='{kind}' AND tier='A' GROUP BY 1,2,3) SELECT s.corpus,s.entity_id,s.yr,s.count,d.denominator FROM s JOIN d ON s.yr=d.yr AND s.corpus=d.corpus ORDER BY 1,2,3"""
         stats[name]=growth_for(con,q,name,out)
     sumexpr=','.join(f'sum({c}) {c}' for c in IMPACT_SUM_COLS)
     impact_specs={
-      'impact_coverage_by_year_corpus':f"SELECT publication_year year,corpus,tier,{sumexpr} FROM base WHERE kind='universe' GROUP BY 1,2,3",
-      'primary_topic_impact_year':f"SELECT publication_year year,corpus,tier,id entity_id,{sumexpr} FROM base WHERE kind='primary_topic' GROUP BY 1,2,3,4",
-      'primary_subfield_impact_year':f"SELECT publication_year year,corpus,tier,id entity_id,{sumexpr} FROM base WHERE kind='primary_subfield' GROUP BY 1,2,3,4",
-      'primary_field_impact_year':f"SELECT publication_year year,corpus,tier,id entity_id,{sumexpr} FROM base WHERE kind='primary_field' GROUP BY 1,2,3,4",
-      'primary_domain_impact_year':f"SELECT publication_year year,corpus,tier,id entity_id,{sumexpr} FROM base WHERE kind='primary_domain' GROUP BY 1,2,3,4",
-      'keyword_impact_year':f"SELECT publication_year year,corpus,tier,keyword_id entity_id,{sumexpr} FROM kw GROUP BY 1,2,3,4",
+      'impact_coverage_by_year_corpus':f"SELECT publication_year AS yr,corpus,tier,{sumexpr} FROM base WHERE kind='universe' GROUP BY 1,2,3",
+      'primary_topic_impact_year':f"SELECT publication_year AS yr,corpus,tier,id entity_id,{sumexpr} FROM base WHERE kind='primary_topic' GROUP BY 1,2,3,4",
+      'primary_subfield_impact_year':f"SELECT publication_year AS yr,corpus,tier,id entity_id,{sumexpr} FROM base WHERE kind='primary_subfield' GROUP BY 1,2,3,4",
+      'primary_field_impact_year':f"SELECT publication_year AS yr,corpus,tier,id entity_id,{sumexpr} FROM base WHERE kind='primary_field' GROUP BY 1,2,3,4",
+      'primary_domain_impact_year':f"SELECT publication_year AS yr,corpus,tier,id entity_id,{sumexpr} FROM base WHERE kind='primary_domain' GROUP BY 1,2,3,4",
+      'keyword_impact_year':f"SELECT publication_year AS yr,corpus,tier,keyword_id entity_id,{sumexpr} FROM kw GROUP BY 1,2,3,4",
     }
     impact_rows={}
     for name,q in impact_specs.items():impact_rows[name]=impact_copy(con,q,out/f'{name}.parquet')
