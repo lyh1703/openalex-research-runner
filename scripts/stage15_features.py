@@ -83,31 +83,31 @@ def main():
     con.execute(f"""
       CREATE TABLE year_context AS
       WITH a AS (
-        SELECT pub_year year,corpus,tier,
+        SELECT pub_year AS year,corpus,tier,
                sum(authors_count*works)::DOUBLE/nullif(sum(works),0) global_avg_authors_per_work,
                sum(works) analytic_works
         FROM read_parquet({q(author_hist)})
         GROUP BY 1,2,3
       ), i AS (
-        SELECT pub_year year,corpus,tier,
+        SELECT pub_year AS year,corpus,tier,
                sum(institutions_distinct_count*works)::DOUBLE/nullif(sum(works),0) global_avg_institutions_per_work
         FROM read_parquet({q(inst_hist)})
         GROUP BY 1,2,3
       ), c AS (
-        SELECT pub_year year,corpus,tier,
+        SELECT pub_year AS year,corpus,tier,
                sum(countries_distinct_count*works)::DOUBLE/nullif(sum(works),0) global_avg_countries_per_work
         FROM read_parquet({q(country_hist)})
         GROUP BY 1,2,3
       ), ai AS (
-        SELECT pub_year year,corpus,tier,count(DISTINCT institution_id) active_institutions
+        SELECT pub_year AS year,corpus,tier,count(DISTINCT institution_id) active_institutions
         FROM read_parquet({q(inst_activity)})
         GROUP BY 1,2,3
       ), ac AS (
-        SELECT pub_year year,corpus,tier,count(DISTINCT country_code) active_countries
+        SELECT pub_year AS year,corpus,tier,count(DISTINCT country_code) active_countries
         FROM read_parquet({q(country_activity)})
         GROUP BY 1,2,3
       ), cp AS (
-        SELECT pub_year year,corpus,tier,
+        SELECT pub_year AS year,corpus,tier,
                sum(works) country_pair_work_events,
                count(*) country_pair_keys
         FROM read_parquet({q(country_pairs)})
@@ -134,7 +134,7 @@ def main():
     # Multi-label topic breadth layer from Stage 9.
     con.execute(f"""
       CREATE TABLE topic_breadth AS
-      SELECT publication_year year, topic_id,
+      SELECT publication_year AS year, topic_id,
              sum(works) multilabel_topic_works,
              sum(institution_distinct_sum) institution_incidence_sum,
              sum(country_distinct_sum) country_incidence_sum,
