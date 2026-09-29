@@ -25,16 +25,16 @@ KEYWORD_FEATURES=[
  "share_percentile_year","share_cagr_3y_percentile_year","mature_fwci_percentile_year"
 ]
 TARGETS_TOPIC=[
- ("growth",3,"future_share_growth","growth_event","growth_outcome_percentile","growth_eligible"),
- ("growth",5,"future_share_growth","growth_event","growth_outcome_percentile","growth_eligible"),
- ("cross_domain_convergence",3,"future_cross_domain_partner_delta","convergence_event","convergence_outcome_percentile","convergence_eligible"),
- ("cross_domain_convergence",5,"future_cross_domain_partner_delta","convergence_event","convergence_outcome_percentile","convergence_eligible"),
- ("realized_cohort_impact",3,"eventual_cohort_mean_fwci","impact_event","impact_outcome_percentile","impact_eligible"),
+ ("growth",3,"future_share_growth","growth_breakout_event","growth_outcome_percentile","growth_eligible"),
+ ("growth",5,"future_share_growth","growth_breakout_event","growth_outcome_percentile","growth_eligible"),
+ ("cross_domain_convergence",3,"future_cross_domain_partner_delta","convergence_breakout_event","convergence_outcome_percentile","convergence_eligible"),
+ ("cross_domain_convergence",5,"future_cross_domain_partner_delta","convergence_breakout_event","convergence_outcome_percentile","convergence_eligible"),
+ ("realized_cohort_impact",3,"eventual_cohort_mean_fwci","impact_breakout_event","impact_outcome_percentile","impact_eligible"),
 ]
 TARGETS_KEYWORD=[
- ("growth",3,"future_share_growth","growth_event","growth_outcome_percentile","growth_eligible"),
- ("growth",5,"future_share_growth","growth_event","growth_outcome_percentile","growth_eligible"),
- ("realized_cohort_impact",3,"eventual_cohort_mean_fwci","impact_event","impact_outcome_percentile","impact_eligible"),
+ ("growth",3,"future_share_growth","growth_breakout_event","growth_outcome_percentile","growth_eligible"),
+ ("growth",5,"future_share_growth","growth_breakout_event","growth_outcome_percentile","growth_eligible"),
+ ("realized_cohort_impact",3,"eventual_cohort_mean_fwci","impact_breakout_event","impact_outcome_percentile","impact_eligible"),
 ]
 
 def q(x): return "'" + str(x).replace("'","''") + "'"
@@ -111,11 +111,11 @@ def create_topic_panel(con,src,out):
       COPY (
         SELECT b.*,
                gr.growth_outcome_percentile,
-               CASE WHEN gr.growth_outcome_percentile IS NOT NULL THEN gr.growth_outcome_percentile>=0.90 END growth_event,
+               CASE WHEN gr.growth_outcome_percentile IS NOT NULL THEN gr.growth_outcome_percentile>=0.90 END growth_breakout_event,
                cr.convergence_outcome_percentile,
-               CASE WHEN cr.convergence_outcome_percentile IS NOT NULL THEN cr.convergence_outcome_percentile>=0.90 END convergence_event,
+               CASE WHEN cr.convergence_outcome_percentile IS NOT NULL THEN cr.convergence_outcome_percentile>=0.90 END convergence_breakout_event,
                ir.impact_outcome_percentile,
-               CASE WHEN ir.impact_outcome_percentile IS NOT NULL THEN ir.impact_outcome_percentile>=0.90 END impact_event
+               CASE WHEN ir.impact_outcome_percentile IS NOT NULL THEN ir.impact_outcome_percentile>=0.90 END impact_breakout_event
         FROM topic_panel_base b
         LEFT JOIN topic_growth_rank gr USING(horizon,signal_year,topic_id)
         LEFT JOIN topic_conv_rank cr USING(horizon,signal_year,topic_id)
@@ -174,9 +174,9 @@ def create_keyword_panel(con,src,out):
       COPY (
         SELECT b.*,
                gr.growth_outcome_percentile,
-               CASE WHEN gr.growth_outcome_percentile IS NOT NULL THEN gr.growth_outcome_percentile>=0.90 END growth_event,
+               CASE WHEN gr.growth_outcome_percentile IS NOT NULL THEN gr.growth_outcome_percentile>=0.90 END growth_breakout_event,
                ir.impact_outcome_percentile,
-               CASE WHEN ir.impact_outcome_percentile IS NOT NULL THEN ir.impact_outcome_percentile>=0.90 END impact_event
+               CASE WHEN ir.impact_outcome_percentile IS NOT NULL THEN ir.impact_outcome_percentile>=0.90 END impact_breakout_event
         FROM keyword_panel_base b
         LEFT JOIN keyword_growth_rank gr USING(horizon,signal_year,keyword_id)
         LEFT JOIN keyword_impact_rank ir USING(horizon,signal_year,keyword_id)
@@ -284,29 +284,29 @@ def diagnostics(con,topic_panel,keyword_panel):
         d["topic"][f"growth_{h}y"]={
           "rows":scalar(con,f"SELECT count(*) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND growth_eligible"),
           "years":scalar(con,f"SELECT count(DISTINCT signal_year) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND growth_eligible"),
-          "event_rate":scalar(con,f"SELECT avg(growth_event::INTEGER) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND growth_eligible"),
+          "event_rate":scalar(con,f"SELECT avg(growth_breakout_event::INTEGER) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND growth_eligible"),
           "missing_future_entity_rows":scalar(con,f"SELECT count(*) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND growth_eligible AND future_works=0"),
         }
         d["topic"][f"convergence_{h}y"]={
           "rows":scalar(con,f"SELECT count(*) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND convergence_eligible"),
           "years":scalar(con,f"SELECT count(DISTINCT signal_year) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND convergence_eligible"),
-          "event_rate":scalar(con,f"SELECT avg(convergence_event::INTEGER) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND convergence_eligible"),
+          "event_rate":scalar(con,f"SELECT avg(convergence_breakout_event::INTEGER) FROM read_parquet({q(topic_panel)}) WHERE horizon={h} AND convergence_eligible"),
         }
         d["keyword"][f"growth_{h}y"]={
           "rows":scalar(con,f"SELECT count(*) FROM read_parquet({q(keyword_panel)}) WHERE horizon={h} AND growth_eligible"),
           "years":scalar(con,f"SELECT count(DISTINCT signal_year) FROM read_parquet({q(keyword_panel)}) WHERE horizon={h} AND growth_eligible"),
-          "event_rate":scalar(con,f"SELECT avg(growth_event::INTEGER) FROM read_parquet({q(keyword_panel)}) WHERE horizon={h} AND growth_eligible"),
+          "event_rate":scalar(con,f"SELECT avg(growth_breakout_event::INTEGER) FROM read_parquet({q(keyword_panel)}) WHERE horizon={h} AND growth_eligible"),
           "missing_future_entity_rows":scalar(con,f"SELECT count(*) FROM read_parquet({q(keyword_panel)}) WHERE horizon={h} AND growth_eligible AND future_works=0"),
         }
     d["topic"]["realized_cohort_impact_3y"]={
       "rows":scalar(con,f"SELECT count(*) FROM read_parquet({q(topic_panel)}) WHERE horizon=3 AND impact_eligible"),
       "years":scalar(con,f"SELECT count(DISTINCT signal_year) FROM read_parquet({q(topic_panel)}) WHERE horizon=3 AND impact_eligible"),
-      "event_rate":scalar(con,f"SELECT avg(impact_event::INTEGER) FROM read_parquet({q(topic_panel)}) WHERE horizon=3 AND impact_eligible"),
+      "event_rate":scalar(con,f"SELECT avg(impact_breakout_event::INTEGER) FROM read_parquet({q(topic_panel)}) WHERE horizon=3 AND impact_eligible"),
     }
     d["keyword"]["realized_cohort_impact_3y"]={
       "rows":scalar(con,f"SELECT count(*) FROM read_parquet({q(keyword_panel)}) WHERE horizon=3 AND impact_eligible"),
       "years":scalar(con,f"SELECT count(DISTINCT signal_year) FROM read_parquet({q(keyword_panel)}) WHERE horizon=3 AND impact_eligible"),
-      "event_rate":scalar(con,f"SELECT avg(impact_event::INTEGER) FROM read_parquet({q(keyword_panel)}) WHERE horizon=3 AND impact_eligible"),
+      "event_rate":scalar(con,f"SELECT avg(impact_breakout_event::INTEGER) FROM read_parquet({q(keyword_panel)}) WHERE horizon=3 AND impact_eligible"),
     }
     return d
 
