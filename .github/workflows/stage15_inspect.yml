@@ -1,0 +1,76 @@
+name: OpenAlex Stage 15 Input Inspect
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage15_inspect_start'
+
+permissions:
+  contents: read
+
+env:
+  TAG10: openalex-stage10-12-2026-09-23
+  TAG13: openalex-stage13-2026-09-23
+  TAG14: openalex-stage14-2026-09-23
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5 pytz
+      - name: Download derived layers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p inputs/s10 inputs/s13 inputs/s14
+          gh release download "$TAG10" --pattern "stage10_11_derived.zip" --dir inputs
+          gh release download "$TAG13" --pattern "stage13_outputs.zip" --dir inputs
+          gh release download "$TAG14" --pattern "stage14_outputs.zip" --dir inputs
+          unzip -q inputs/stage10_11_derived.zip -d inputs/s10
+          unzip -q inputs/stage13_outputs.zip -d inputs/s13
+          unzip -q inputs/stage14_outputs.zip -d inputs/s14
+          find inputs/s10 inputs/s13 inputs/s14 -maxdepth 2 -type f | sort | tee STAGE15_INPUT_LISTING.txt
+      - name: Inspect candidate feature schemas
+        run: |
+          python - <<'PY'
+          import duckdb,glob,json,os
+          con=duckdb.connect()
+          wanted=[
+            "topic_growth_year.parquet",
+            "primary_topic_impact_year.parquet",
+            "topic_convergence_year.parquet",
+            "pair_year_primary_signals.parquet",
+            "institution_activity_year.parquet",
+            "country_activity_year.parquet",
+            "country_pair_year.parquet",
+          ]
+          out={}
+          for root in ["inputs/s10","inputs/s13","inputs/s14"]:
+            for p in glob.glob(root+"/**/*.parquet",recursive=True):
+              if os.path.basename(p) not in wanted: continue
+              cur=con.execute(f"SELECT * FROM read_parquet('{p}') LIMIT 3")
+              cols=[d[0] for d in cur.description]
+              out[p]={
+                "rows":con.execute(f"SELECT count(*) FROM read_parquet('{p}')").fetchone()[0],
+                "schema":[{"name":r[0],"type":r[1]} for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{p}')").fetchall()],
+                "sample":[dict(zip(cols,r)) for r in cur.fetchall()]
+              }
+          open("STAGE15_INPUT_SCHEMA.json","w").write(json.dumps(out,indent=2,default=str))
+          print(json.dumps(out,indent=2,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STAGE15_INPUT_INSPECT
+          path: |
+            STAGE15_INPUT_LISTING.txt
+            STAGE15_INPUT_SCHEMA.json
+          retention-days: 14
