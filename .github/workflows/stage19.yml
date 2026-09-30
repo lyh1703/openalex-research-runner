@@ -1,0 +1,126 @@
+name: OpenAlex Stage 19
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage19_start'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openalex-stage19
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  RESULT_TAG: openalex-stage19-program-complete-2026-09-23
+
+jobs:
+  stage19:
+    name: Stage 19 final audit and program closure
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Capture repository and release state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p audit/gates/{stage8_11,stage10_12,stage13,stage14,stage15,stage16,stage17,stage18}
+
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > audit/releases.json
+          gh api "repos/${GITHUB_REPOSITORY}/commits/main" > audit/main_commit.json
+
+          git ls-files | sort > audit/repo_files.txt
+          : > audit/repo_file_sha256.txt
+          while IFS= read -r f; do
+            sha256sum "$f" >> audit/repo_file_sha256.txt
+          done < audit/repo_files.txt
+
+          gh release download openalex-stage8-11-2026-09-23 \
+            --pattern "STAGE8_11_FINAL_GATE.json" \
+            --dir audit/gates/stage8_11
+
+          gh release download openalex-stage10-12-2026-09-23 \
+            --pattern "STAGE10_11_LIVE_GATE.json" \
+            --pattern "STAGE12_FINAL_GATE.json" \
+            --dir audit/gates/stage10_12
+
+          for s in 13 14 15 16 17 18; do
+            gh release download "openalex-stage${s}-2026-09-23" \
+              --pattern "STAGE${s}_FINAL_GATE.json" \
+              --dir "audit/gates/stage${s}"
+          done
+
+          gh release download openalex-stage17-2026-09-23 \
+            --pattern "STAGE17_LIMITATIONS.json" \
+            --dir audit/gates/stage17
+
+          find audit -type f -maxdepth 4 -print | sort
+          sha256sum audit/releases.json audit/main_commit.json audit/repo_files.txt audit/repo_file_sha256.txt audit/gates/*/*.json > audit/STAGE19_AUDIT_INPUT_SHA256.txt
+
+      - name: Run final reproducibility audit
+        run: |
+          python scripts/stage19_finalize.py \
+            --audit audit \
+            --output stage19
+
+      - name: Persist audit input hashes
+        run: |
+          cp audit/STAGE19_AUDIT_INPUT_SHA256.txt stage19/
+          cp audit/repo_file_sha256.txt stage19/REPO_FILE_SHA256.txt
+
+      - name: Package final program artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release_assets
+          cp STAGE19_FINAL_AUDIT_CONTRACT.md release_assets/
+          cp stage19/STAGE19_FINAL_GATE.json release_assets/
+          cp stage19/STAGE19_VALIDATION.json release_assets/
+          cp stage19/FINAL_REPRODUCIBILITY_INDEX.json release_assets/
+          cp stage19/FINAL_ARTIFACT_MANIFEST.json release_assets/
+          cp stage19/FINAL_REPRODUCIBILITY_AUDIT.md release_assets/
+          cp stage19/EXECUTIVE_SUMMARY.md release_assets/
+          cp stage19/PROGRAM_COMPLETE.md release_assets/
+          cp stage19/STAGE19_AUDIT_INPUT_SHA256.txt release_assets/
+          cp stage19/REPO_FILE_SHA256.txt release_assets/
+          (cd stage19 && zip -qr ../release_assets/RESEARCH002_PROGRAM_COMPLETE.zip .)
+          ls -lh release_assets
+
+      - name: Publish persistent Program Complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RESULT_TAG" --yes --cleanup-tag || true
+          gh release create "$RESULT_TAG" release_assets/* \
+            --title "Research 002 OpenAlex | PROGRAM COMPLETE | 2026-09-23" \
+            --notes "Final reproducibility audit, artifact manifest, executive summary and PROGRAM COMPLETE closure for the frozen 2026-09-23 Research 002 OpenAlex program. Derived artifacts are reproducible/auditable; the full raw snapshot is not privately byte-archived and exact historical OpenAlex vintages are not recoverable from a single snapshot."
+
+      - name: Upload compact final gates
+        uses: actions/upload-artifact@v4
+        with:
+          name: OPENALEX_RESEARCH002_PROGRAM_COMPLETE
+          path: |
+            STAGE19_FINAL_AUDIT_CONTRACT.md
+            stage19/STAGE19_FINAL_GATE.json
+            stage19/STAGE19_VALIDATION.json
+            stage19/FINAL_REPRODUCIBILITY_INDEX.json
+            stage19/FINAL_ARTIFACT_MANIFEST.json
+            stage19/FINAL_REPRODUCIBILITY_AUDIT.md
+            stage19/EXECUTIVE_SUMMARY.md
+            stage19/PROGRAM_COMPLETE.md
+            stage19/STAGE19_AUDIT_INPUT_SHA256.txt
+            stage19/REPO_FILE_SHA256.txt
+          retention-days: 30
