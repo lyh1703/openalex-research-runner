@@ -1,0 +1,110 @@
+name: OpenAlex Stage 18
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/openalex_stage18_start'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openalex-stage18
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  TAG13: openalex-stage13-2026-09-23
+  TAG14: openalex-stage14-2026-09-23
+  TAG15: openalex-stage15-2026-09-23
+  TAG16: openalex-stage16-2026-09-23
+  TAG17: openalex-stage17-2026-09-23
+  RESULT_TAG: openalex-stage18-2026-09-23
+
+jobs:
+  stage18:
+    name: Stage 18 transfer matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install runtime
+        run: python -m pip install --quiet duckdb==1.5.5
+
+      - name: Download frozen upstream gates and Stage 17 evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p gates raw stage17
+          gh release download "$TAG13" --pattern "STAGE13_FINAL_GATE.json" --dir gates
+          gh release download "$TAG14" --pattern "STAGE14_FINAL_GATE.json" --dir gates
+          gh release download "$TAG15" --pattern "STAGE15_FINAL_GATE.json" --dir gates
+          gh release download "$TAG16" --pattern "STAGE16_FINAL_GATE.json" --dir gates
+          gh release download "$TAG17" --pattern "STAGE17_FINAL_GATE.json" --dir gates
+          gh release download "$TAG17" --pattern "stage17_outputs.zip" --dir raw
+          unzip -q raw/stage17_outputs.zip \
+            feature_robustness_flags.parquet \
+            STAGE17_LIMITATIONS.json \
+            -d stage17
+          sha256sum gates/STAGE*_FINAL_GATE.json raw/stage17_outputs.zip | tee STAGE18_INPUT_SHA256.txt
+          ls -lh gates stage17
+
+      - name: Build Stage 18 transfer matrix
+        run: |
+          python scripts/stage18_transfer.py \
+            --gates gates \
+            --stage17 stage17 \
+            --output stage18
+
+      - name: Persist provenance
+        run: cp STAGE18_INPUT_SHA256.txt stage18/
+
+      - name: Package Stage 18 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release_assets
+          cp STAGE18_TRANSFER_CONTRACT.md release_assets/
+          cp stage18/STAGE18_FINAL_GATE.json release_assets/
+          cp stage18/STAGE18_VALIDATION.json release_assets/
+          cp stage18/TRANSFER_TARGET_SUMMARY.json release_assets/
+          cp stage18/TRANSFER_ARTIFACT_REGISTRY.json release_assets/
+          cp stage18/APPLIED_INTERFACE_SPEC.md release_assets/
+          cp stage18/NOUS_KNOWLEDGE_CARD_OPENALEX_002.json release_assets/
+          cp stage18/STAGE18_INPUT_SHA256.txt release_assets/
+          cp stage18/OPENALEX_STAGE18_TRANSFER_REPORT.md release_assets/
+          (cd stage18 && zip -qr ../release_assets/stage18_outputs.zip .)
+          ls -lh release_assets
+
+      - name: Publish persistent Stage 18 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RESULT_TAG" --yes --cleanup-tag || true
+          gh release create "$RESULT_TAG" release_assets/* \
+            --title "OpenAlex Stage 18 | 2026-09-23 frozen snapshot" \
+            --notes "TRANSFER_MATRIX and applied interface contract for Academic Research Landscape, Lab Graph, ATLAS, NOUS, ChemE Research Intelligence and Venture/Business Scouting. Carries Stage 17 robustness evidence and single-snapshot limitations forward without composite scoring."
+
+      - name: Upload compact Stage 18 gates
+        uses: actions/upload-artifact@v4
+        with:
+          name: OPENALEX_STAGE18_FINAL_GATES
+          path: |
+            STAGE18_TRANSFER_CONTRACT.md
+            stage18/STAGE18_FINAL_GATE.json
+            stage18/STAGE18_VALIDATION.json
+            stage18/TRANSFER_TARGET_SUMMARY.json
+            stage18/TRANSFER_ARTIFACT_REGISTRY.json
+            stage18/APPLIED_INTERFACE_SPEC.md
+            stage18/NOUS_KNOWLEDGE_CARD_OPENALEX_002.json
+            stage18/STAGE18_INPUT_SHA256.txt
+            stage18/OPENALEX_STAGE18_TRANSFER_REPORT.md
+          retention-days: 30
